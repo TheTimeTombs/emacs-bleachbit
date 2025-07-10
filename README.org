@@ -9,4 +9,31 @@
 #+creator: Emacs 31.0.50 (Org mode 9.7.11)
 #+cite_export:
 
-Run Bleachbit from Emacs.
+
+* Overview
+
+Control bleachbit from Emacs.
+
+* Why Bleachbit in Emacs?
+
+
+
+* Project Goals
+
+1. [X] Create a system to run Bleachbit from Emacs
+2. [X] Set the cleaner options from withi
+3. [ ] Parse Bleachbit cleaner files
+4. [ ] Create custom cleaners for Bleachbit from within Emacs
+5. [ ] Completely port over cleaners to Emacs Lisp
+6. [ ] Port from Emacs Lisp to Common Lisp
+
+* Features
+
+- Run bleachbit from Emacs
+- Display, select, and deselect cleaner options from an Emacs tablist
+
+* Requirements
+
+- Emacs 28.1 or higher
+- Emacs [[https://github.com/politza/tablist][tablist]] package
+- Emacs [[https://github.com/EsaLaine/ini.el][ini]] package
