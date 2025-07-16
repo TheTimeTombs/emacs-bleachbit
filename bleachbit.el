@@ -30,6 +30,7 @@
 
 ;;; Code:
 
+(require 'dom)
 (require 'ini)
 (require 'shelly)
 (require 'tablist)
@@ -52,7 +53,7 @@ Customized options stored in the alist")
 (defvar bleachbit--config-alist nil
   "An alist storing the parsed `bleacbit.ini' config.")
 
-(defvar bleachbit--options-alist nil
+(defvar bleachbit--marked-options-alist nil
   "An alist of bleachbit options in the form of `(OPTION . STRING)'.
 
 OPTION must be an option to select from the bleachbit cleander definition.
@@ -66,43 +67,48 @@ option is active when bleachbit is run.")
                       (string-prefix-p "Gtk"item)))
                 (split-string (shelly-command-to-string "bleachbit --list") "\n")))
 
-(defun bleachbit--parse-cleaner-file (file-path)
-  "Parse cleaner file from FILE-PATH with libxml."
+(defun bleachbit--parse-cleanerml-file (file-path)
+  "Parse cleanerML file from FILE-PATH with libxml."
   (if (libxml-available-p )
       (with-temp-buffer
         (insert-file-contents file-path)
+        (xml-remove-comments (point-min) (point-max))
         (libxml-parse-xml-region (point-min) (point-max)))
     (error "Emacs must be compliled with libxml2 support to parse bleachbit\
- cleaners.")))
+ cleaners")))
 
 (defun bleachbit--get-cleaner (parsed-file)
   "Restun the alist with key `cleaner' from the alist PARSED-FILE."
   (assoc 'cleaner parsed-file))
 
-(defun bleachbit--get-cleaner-name (cleaner)
-  "Get ."
-  (or (nth 2 (assoc 'label cleaner))
-      ""))
+(defun bleachbit--node-parent-tag (dom tag)
+  "Return tag of the parent of the first node with tag TAG in DOM."
+  (thread-last
+    (dom-by-tag dom tag)
+    (car)
+    (dom-parent dom)
+    (dom-tag)))
 
 (defun bleachbit--get-cleaner-desc (cleaner)
-  ""
-  (or (nth 2 (assoc 'description cleaner))
-      ""))
+  "Return the description for CLEANER, if it exists, otherwise nil."
+  (when (equal (bleachbit--node-parent-tag cleaner 'description) 'cleaner)
+    (nth 2 (car (dom-by-tag cleaner 'description)))))
 
-(defun bleachbit--options-to-entires (id cleaner-name cleaner-desc cleaner)
-  ""
-  (cl-loop for item in cleaner
-           if (and (listp item)
-                   (eql (car item) 'option))
-           collect`(,(make-symbol (format "%s.%s" id (bleachbit--get-id item)))
-                    [,(format "%s.%s" id (bleachbit--get-id item))
-                     ,cleaner-name
-                     ,cleaner-desc
-                     ,(nth 2 (nth 2 item))
-                     ,(nth 2 (nth 3 item))])))
+(defun bleachbit--create-entry-list (cleaner)
+  "Convert the options of CLEANER to a list for `tabulated-list-entries'."
+  (let ((id (dom-attr cleaner 'id))
+        (cleaner-name (nth 2 (car (dom-by-tag cleaner 'label))))
+        (cleaner-description (or (bleachbit--get-cleaner-desc cleaner) "")))
+    (cl-loop for option in (dom-by-tag cleaner 'option)
+             collect `(1 [,(format "%s.%s" id (dom-attr option 'id))
+                          ,cleaner-name
+                          ,cleaner-description
+                          ,(nth 2 (car (dom-by-tag option 'label)))
+                          ,(nth 2 (car (dom-by-tag option 'description)))]))))
 
-(defun bleachbit--update-options-alist ()
-  (setf bleachbit--options-alist
+(defun bleachbit--update-marked-options-alist ()
+  "Update `bleachbit--marked-options-alist' with currently marked items."
+  (setf bleachbit--marked-options-alist
         (cl-loop for option in (tablist-get-marked-items)
                  collect `(,(aref (cdr option) 0) . "True"))))
 
@@ -111,7 +117,7 @@ option is active when bleachbit is run.")
   (interactive)
   (bleachbit--update-options-alist)
   (thread-first (assoc-delete-all "tree" bleachbit--config-alist)
-                (append `(("tree" ,@bleachbit--options-alist)))
+                (append `(("tree" ,@bleachbit--marked-options-alist)))
                 (ini-store bleachbit-config-path nil t)))
 
 (defun bleachbit--get-id (tree)
@@ -131,12 +137,13 @@ option is active when bleachbit is run.")
                                  ("Option Descrption" 8 t)])
     (tabulated-list-init-header)
     (setf tabulated-list-entries
-          (cl-loop for file in (directory-files bleachbit-cleaners-dir t "[^.xml]")
-                   do (setf cleaner (bleachbit--get-cleaner (bleachbit--parse-cleaner-file file)))
-                   append (bleachbit--options-to-entires (bleachbit--get-id cleaner)
-                                                         (bleachbit--get-cleaner-name cleaner)
-                                                         (bleachbit--get-cleaner-desc cleaner)
-                                                         cleaner)))
+          (cl-loop for file in (directory-files bleachbit-cleaners-dir
+                                                t
+                                                "[^.xml]")
+                   do (setf cleaner (dom-by-tag (bleachbit--parse-cleanerml-file
+                                                 file)
+                                                'cleaner))
+                   append (bleachbit--create-entry-list cleaner)))
     (revert-buffer)
     (bleachbit--mark-options)))
 
@@ -175,17 +182,16 @@ If AS-ROOT is non-nil, run the command as a root user."
   "Transient menu for bleachbit."
   :incompatible '(("--preview" "--clean"))
   ["Bleachbit"
-   ("c" "set cleaner preset" bleachbit-options)
+   ("sp" "set cleaner preset" bleachbit-options)
    ("c" "clean preset" bleachbit-clean)
    ("C" "clean (as root)" bleachbit-clean-as-root)
    ("p" "preview" bleachbit-preview)
    ("P" "preview (as root)" bleachbit-preview-as-root)
-   ("s" "shred files/directories" bleachbit-shred)]
+   ("sf" "shred files/directories" bleachbit-shred)]
   ["Options"
    ("-a" "all but warning (overrides preset)" "--all-but-warning")
    ("-w" "wipe free space" "--wipe-free-space")
-   ("-o" "overwrite files" "--overwrite")
-   ])
+   ("-o" "overwrite files" "--overwrite")])
 
 (defvar bleachbit-options-mode-map
   (let ((map (make-sparse-keymap)))
@@ -194,8 +200,7 @@ If AS-ROOT is non-nil, run the command as a root user."
       (define-key map "P" #'bleachbit-preview-as-root)
       (define-key map "c" #'bleachbit-clean)
       (define-key map "C" #'bleachbit-clean-as-root)
-      (define-key map "s" #'bleachbit-save-options)
-      )
+      (define-key map "s" #'bleachbit-save-options))
     map)
   "Keymap for `bleachbit-options-mode'.")
 
@@ -207,12 +212,12 @@ If AS-ROOT is non-nil, run the command as a root user."
 (defun bleachbit-preview ()
   "Run `bleachbit --preview'."
   (interactive)
-  (bleachbit--execute nil "--clean" "--preview"))
+  (bleachbit--execute nil "--preview" "--preset"))
 
 (defun bleachbit-preview-as-root ()
   "Run `bleachbit --preview' as the root user."
   (interactive)
-  (bleachbit--execute t "--clean" "--preview"))
+  (bleachbit--execute t "--preview" "--preset"))
 
 (defun bleachbit-clean ()
   "Run `bleachbit --clean'."
