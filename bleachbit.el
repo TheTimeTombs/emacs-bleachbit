@@ -82,8 +82,23 @@ Customized options stored in the alist")
   (interactive)
   (setf bleachbit-current-host (shelly-select-host)))
 
+(defun bleachbit--list-to-string (lst)
+  "Return a space-separated string containing all elements of LST."
+  (mapconcat #'identity lst " "))
+
 
 ;;; Shell commands
+
+(defun bleachbit--execute (as-root &rest arguments)
+  "Run bleachbit in an inferior shell with ARGUMENTS.
+If AS-ROOT is non-nil, run the command as a root user."
+  (thread-last
+    (if (bound-and-true-p transient-current-command)
+        (append arguments (transient-args transient-current-command))
+      arguments)
+    (bleachbit--list-to-string)
+    (format "%sbleachbit %s" (if as-root "sudo " ""))
+    (shelly-run-command)))
 
 (defun bleachbit-shred (filepath)
   "Prompt user for FILEPATH and pass to `bleachbit --shred'."
@@ -234,7 +249,9 @@ If SEARCH-TYPE is 'id, then return the list specified by SEARCH-VALUES."
               (next-line))))))))
 
 (defun bleachbit-options-list--describe (&rest options)
-  "display"
+  "Describe functin for each entry in `bleachbit-options-list-mode'.
+OPTIONS is a list of option entry IDs that will be displayed using
+`bleachbit-options-info-mode'."
   (bui-get-display-entries 'bleachbit-options 'info (cons 'id options)))
 
 (let ((map bleachbit-options-list-mode-map))
@@ -246,7 +263,7 @@ If SEARCH-TYPE is 'id, then return the list specified by SEARCH-VALUES."
   (define-key map (kbd "x") #'bleachbit))
 
 (easy-menu-define bleachbit-options-list-mode-menu bleachbit-options-list-mode-map
-  "Menu when `trapt-list-mode' is active."
+  "Menu when `bleachbit-options-list-mode' is active."
   `("Bleachbit Options"
     ["Clean" bleachbit-clean
      :help "Save current options and run Bleachbit clean."]
@@ -257,48 +274,28 @@ If SEARCH-TYPE is 'id, then return the list specified by SEARCH-VALUES."
     ["Preview (as root)" bleachbit-preview-as-root
      :help "Save current options and run Bleachbit preview as root user."]))
 
-  (defun bleachbit--list-to-string (lst)
-    "Return a space-separated string containing all elements of LST."
-    (mapconcat #'identity lst " "))
-
-(defun bleachbit--execute (as-root &rest arguments)
-  "Run bleachbit in an inferior shell with ARGUMENTS.
-
-If AS-ROOT is non-nil, run the command as a root user."
-  (thread-last
-    (if (bound-and-true-p transient-current-command)
-        (append arguments (transient-args transient-current-command))
-      arguments)
-    (bleachbit--list-to-string)
-    (format "%sbleachbit %s" (if as-root "sudo " ""))
-    (shelly-run-command)))
-
 
 ;;; Transient menu
 
-(transient-define-prefix bleachbit ()
-                         "Transient menu for bleachbit."
-                         :incompatible '(("--preview" "--clean"))
-                         ["Bleachbit"
-                          ("sp" "set cleaner preset" bleachbit-set-preset)
-                          ("c" "clean preset" bleachbit-clean)
-                          ("C" "clean (as root)" bleachbit-clean-as-root)
-                          ("p" "preview" bleachbit-preview)
-                          ("P" "preview (as root)" bleachbit-preview-as-root)
-                          ("sf" "shred files/directories" bleachbit-shred)]
-                         ["Options"
-                          ("-a" "all but warning (overrides preset)" "--all-but-warning")
-                          ("-w" "wipe free space" "--wipe-free-space")
-                          ("-o" "overwrite files" "--overwrite")]
-                         ["Host"
-                          ("H" "host" bleachbit-select-host
-                           :transient t
-                           :description (lambda () (format "Host: %s" bleachbit-current-host)))])
-
 ;;;###autoload
-(define-derived-mode bleachbit-options-mode tablist-mode "Cleaners"
-  "Major mode for interacting with a list of packages from APT."
-  :keymap bleachbit-options-mode-map)
+(transient-define-prefix bleachbit ()
+  "Transient menu for bleachbit."
+  :incompatible '(("--preview" "--clean"))
+  ["Bleachbit"
+   ("sp" "set cleaner preset" bleachbit-set-preset)
+   ("c" "clean preset" bleachbit-clean)
+   ("C" "clean (as root)" bleachbit-clean-as-root)
+   ("p" "preview" bleachbit-preview)
+   ("P" "preview (as root)" bleachbit-preview-as-root)
+   ("sf" "shred files/directories" bleachbit-shred)]
+  ["Options"
+   ("-a" "all but warning (overrides preset)" "--all-but-warning")
+   ("-w" "wipe free space" "--wipe-free-space")
+   ("-o" "overwrite files" "--overwrite")]
+  ["Host"
+   ("H" "host" bleachbit-select-host
+    :transient t
+    :description (lambda () (format "Host: %s" bleachbit-current-host)))])
 
 (provide 'bleachbit)
 
