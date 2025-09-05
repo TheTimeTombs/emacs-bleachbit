@@ -79,10 +79,12 @@ Customized options stored in the alist")
                 (split-string (shelly-command-to-string "bleachbit --list") "\n")))
 
 (defun bleachbit-select-host ()
+  "Set `bleachbit-current-host' with result of `shelly-select-host'."
   (interactive)
   (setf bleachbit-current-host (shelly-select-host)))
 
 (defun bleachbit--list-to-string (lst)
+  "Convert list LST into a space-separated string."
   "Return a space-separated string containing all elements of LST."
   (mapconcat #'identity lst " "))
 
@@ -147,7 +149,7 @@ If AS-ROOT is non-nil, run the command as a root user."
 cleaners")))
 
 (defun bleachbit--parse-cleaners ()
-  "Convert the options of CLEANER to a list for `tabulated-list-entries'."
+  "Parse bleachbit cleanerMl files with libxml and return the cleaner."
   (cl-loop for file in (directory-files bleachbit-cleaners-dir t "[^.xml]")
            do (setf parsed-file (bleachbit--parse-cleanerml-file file))
            collect `(,(file-name-base file) .
@@ -156,9 +158,10 @@ cleaners")))
 
 ;;; BUI Bleachbit options entry type
 
-(defun bleachbit--option->entry (search-term)
+(defun bleachbit--option->entry (option-id)
+  "Return OPTION-ID as a formatted `bleachbit-options' entry."
   (cl-destructuring-bind
-      (cln opt) (split-string search-term "\\.")
+      (cln opt) (split-string option-id "\\.")
     (let* ((cleaner (cdr (assoc cln bleachbit--cleaners))))
       `((id . ,search-term)
         (name .  ,cln)
@@ -168,9 +171,9 @@ cleaners")))
 
 (defun bleachbit--get-options (&optional search-type &rest search-values)
   "Generate the list of search terms for bleachbit options.
-If SEARCH-TYPE is 'all, then return all bleachbit cleaner options.
+If SEARCH-TYPE is 'all, then return a list of all `'bleachbit-options' IDs.
 
-If SEARCH-TYPE is 'id, then return the list specified by SEARCH-VALUES."
+If SEARCH-TYPE is 'id, then return the list SEARCH-VALUES."
   (or search-type (setf search-type 'all))
   (cl-case search-type
     (all (bleachbit--get-cleaners-list))
@@ -178,7 +181,15 @@ If SEARCH-TYPE is 'id, then return the list specified by SEARCH-VALUES."
     (t (error "Unknown search type: %S" search-type))))
 
 (defun bleachbit--get-entries (&rest args)
-  ""
+  "Return a list of `bleachbit-option' entry types.
+
+ARGS is a list of where the first element is either the symbol `all' or `id'.
+
+If the first element of ARGS is the symbol `all', then all of the possible
+`bleachbit-options' entries will be returned.
+
+If the first element of ARGS is `id', then the remaining arguments must best
+a series of `bleachbit-options' entry type IDs to return."
   (mapcar #'bleachbit--option->entry
           (apply #'bleachbit--get-options args)))
 
@@ -198,22 +209,12 @@ If SEARCH-TYPE is 'id, then return the list specified by SEARCH-VALUES."
 
 ;;; Bleachbit options list interface
 
-(defun bleachbit-set-preset ()
-  (interactive)
-  (setf bleachbit--cleaners (bleachbit--parse-cleaners))
-  (bui-get-display-entries 'bleachbit-options 'list)
-  (bleachbit--mark-options))
-
-(bui-define-interface bleachbit-options list
-  :mode-name "Bleachbit Options"
-  :buffer-name bleachbit-options-list--buffer-name
-  :get-entries-function #'bleachbit--get-entries
-  :describe-function #'bleachbit-options-list--describe
-  :format '((name nil 20 t)
-            (description nil 20 t)
-            (option nil 20 t)
-            (option-description nil 20 t))
-  :sort-key '(name))
+(defun bleachbit--parse-options ()
+  "Parse `bleachbit.ini' and `bleachbit--options-alist' from `tree'."
+  (thread-last (ini-decode bleachbit-config-path)
+               (setf bleachbit--config-alist)
+               (assoc-string "tree")
+               (cdr)))
 
 (defun bleachbit-save-options ()
   "Save the updated options to `bleachbit.ini'."
@@ -225,13 +226,6 @@ If SEARCH-TYPE is 'id, then return the list specified by SEARCH-VALUES."
       (assoc-delete-all "tree" bleachbit--config-alist)
       (append `(("tree" ,@(reverse marked-options))))
       (ini-store bleachbit-config-path nil t))))
-
-(defun bleachbit--parse-options ()
-  "Set `bleachbit--options-alist' from `tree' in `bleachbit.ini'."
-  (thread-last (ini-decode bleachbit-config-path)
-               (setf bleachbit--config-alist)
-               (assoc-string "tree")
-               (cdr)))
 
 (defun bleachbit--mark-options ()
   "Mark all cleaner options marked as `True' in `bleachbit--options-alist'."
@@ -253,6 +247,25 @@ If SEARCH-TYPE is 'id, then return the list specified by SEARCH-VALUES."
 OPTIONS is a list of option entry IDs that will be displayed using
 `bleachbit-options-info-mode'."
   (bui-get-display-entries 'bleachbit-options 'info (cons 'id options)))
+
+(defun bleachbit-set-preset ()
+  "Interactive function allowing users to set bleachbit options.
+Options can be set by marking entries in a tabulated-list."
+  (interactive)
+  (setf bleachbit--cleaners (bleachbit--parse-cleaners))
+  (bui-get-display-entries 'bleachbit-options 'list)
+  (bleachbit--mark-options))
+
+(bui-define-interface bleachbit-options list
+  :mode-name "Bleachbit Options"
+  :buffer-name bleachbit-options-list--buffer-name
+  :get-entries-function #'bleachbit--get-entries
+  :describe-function #'bleachbit-options-list--describe
+  :format '((name nil 20 t)
+            (description nil 20 t)
+            (option nil 20 t)
+            (option-description nil 20 t))
+  :sort-key '(name))
 
 (let ((map bleachbit-options-list-mode-map))
   (define-key map (kbd "c") #'bleachbit-clean)
